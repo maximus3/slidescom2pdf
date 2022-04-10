@@ -1,51 +1,37 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-import os
-import glob
+from pathlib import Path
 import time
-import getpass
+import img2pdf
 
 from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 
-from config import *
+SLIDE_SIZE = (1280, 960)
+TMP_DIR = 'tmp'
 
-def get_slides_ss(uname, email, passwd, deck_name, ss_dir):
-    options = Options()
-    options.add_argument('--headless')
-    driver = webdriver.Chrome(chrome_options=options)
+
+def get_slides_ss(deck_link):
+    ss_dir = TMP_DIR
+    driver = webdriver.Chrome(service=Service('chromedriver.exe'))
     driver.set_window_size(*SLIDE_SIZE)
 
-    driver.get('https://slides.com/users/sign_in')
-    driver.find_element_by_id('user_email').send_keys(email)
-    driver.find_element_by_id('user_password').send_keys(passwd)
-    driver.find_element_by_name('button').click()
-
-    WebDriverWait(driver, 5).until(EC.presence_of_element_located(
-        (By.CLASS_NAME, 'picture')))
-    driver.get('https://slides.com/{}/{}/live#/'.format(uname, deck_name))
-    WebDriverWait(driver, 5).until(EC.presence_of_element_located(
-        (By.XPATH, '//footer/button')))
-    time.sleep(2)
-    driver.find_element_by_xpath('//footer/button').click()
+    driver.get(deck_link)
+    time.sleep(5)
 
     ss_idx = 0
     while True:
         time.sleep(2)
-        ss_fname = '{}{:04d}.png'.format(SCREENSHOT_BASENAME, ss_idx)
-        driver.save_screenshot(os.path.join(ss_dir, ss_fname))
-        right_arrow = driver.find_element_by_xpath('//button[2]')
-        down_arrow = driver.find_element_by_xpath('//button[4]')
-        if 'enabled' in down_arrow.get_attribute('class'):
-            down_arrow.find_element_by_xpath('.//div').click()
+        ss_fname = '{:04d}.png'.format(ss_idx)
+        driver.save_screenshot(str(Path(ss_dir) / ss_fname))
+        right_arrow = driver.find_element(by=By.CLASS_NAME, value='navigate-down')
+        down_arrow = driver.find_element(by=By.CLASS_NAME, value='navigate-right')
+        if right_arrow.is_enabled():
+            right_arrow.click()
             print('Wrote: {}'.format(ss_fname))
             ss_idx += 1
             continue
-        elif 'enabled' in right_arrow.get_attribute('class'):
-            right_arrow.find_element_by_xpath('.//div').click()
+        elif down_arrow.is_enabled():
+            down_arrow.click()
             print('Wrote: {}'.format(ss_fname))
             ss_idx += 1
             continue
@@ -53,30 +39,28 @@ def get_slides_ss(uname, email, passwd, deck_name, ss_dir):
             break
     return ss_idx
 
-def make_ss_dir(ss_dir):
-    if os.path.isdir(ss_dir):
-        old_files = glob.glob(os.path.join(ss_dir, '*'))
-        for old_file in old_files:
-            if os.path.isfile(old_file):
-                os.remove(old_file)
+
+def make_tmp_dir(ss_dir):
+    if Path(ss_dir).exists():
+        for old_file in Path(ss_dir).glob('*'):
+            if old_file.is_file():
+                old_file.unlink()
     else:
-        os.makedirs(ss_dir)
+        Path(ss_dir).mkdir()
+
 
 def main():
-    for info in INPUT_INFO.values():
-        if len(info['value']) == 0:
-            info['value'] = input(info['phrase'])
-    passwd = getpass.getpass('your password: ')
+    deck_link = 'https://slides.com/afonasev/fintech-2022-python-2/fullscreen'
+    output_name = 'output.pdf'
 
-    info = INPUT_INFO
-    make_ss_dir(info['ss_dir']['value'])
-    num_ss = get_slides_ss(
-            info['uname']['value'], info['email']['value'],
-            passwd, info['deck_name']['value'], info['ss_dir']['value'])
+    make_tmp_dir(TMP_DIR)
+    get_slides_ss(deck_link)
 
-    ss_fname = os.path.join(
-            info['ss_dir']['value'], '{}*.png'.format(SCREENSHOT_BASENAME))
-    os.system('convert {} ./{}'.format(ss_fname, info['pdf_fname']['value']))
+    filenames = list(map(lambda x: str(x), Path(TMP_DIR).glob('*.png')))
+    pdf = img2pdf.convert(filenames)
+    with open(output_name, 'wb') as f:
+        f.write(pdf)
+
 
 if __name__ == '__main__':
     main()
